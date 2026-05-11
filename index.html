@@ -1,23 +1,17 @@
-
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>Play Audio</title>
-  <style>
-    body { font-family: Arial; padding: 20px; }
-    button { padding: 10px 20px; font-size: 16px; }
-    #log { margin-top: 20px; white-space: pre-wrap; background: #f4f4f4; padding: 10px; }
-  </style>
+<meta charset="UTF-8">
+<title>Audio Trigger</title>
+<style>
+  body { font-family: Arial; padding: 20px; }
+  #status { margin-left: 10px; color: green; }
+</style>
 </head>
 <body>
 
-<h2>Audio Trigger</h2>
-
 <button onclick="start()">Reproducir audio</button>
-<button onclick="callParticipantsDirect()">Reintentar</button>
-
-<div id="log"></div>
+<span id="status"></span>
 
 <script>
 const CLIENT_ID = "b85aea77-eb2c-454c-a8e9-a00ee57d5f3f";
@@ -28,14 +22,7 @@ const AUTH_URL = `https://login.${REGION}/oauth/authorize`;
 const TOKEN_URL = `https://login.${REGION}/oauth/token`;
 const API_URL = `https://api.${REGION}`;
 
-function log(msg) {
-  document.getElementById("log").innerText += "\n" + msg;
-}
-
-// ======================
-// UTIL
-// ======================
-function getQueryParam(name) {
+function getParam(name) {
   return new URLSearchParams(window.location.search).get(name);
 }
 
@@ -56,23 +43,14 @@ async function sha256(plain) {
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-// ======================
-// STEP 1: LOGIN PKCE
-// ======================
+// LOGIN
 async function start() {
-  log("Iniciando PKCE...");
-
   const codeVerifier = randomString(64);
   const codeChallenge = await sha256(codeVerifier);
 
-  sessionStorage.setItem("code_verifier", codeVerifier);
+  sessionStorage.setItem("verifier", codeVerifier);
 
-  const conversationId = getQueryParam("conversationId");
-  if (!conversationId) {
-    alert("Falta conversationId");
-    return;
-  }
-
+  const conversationId = getParam("conversationId");
   sessionStorage.setItem("conversationId", conversationId);
 
   const url = `${AUTH_URL}?response_type=code`
@@ -84,56 +62,32 @@ async function start() {
   window.location = url;
 }
 
-// ======================
-// STEP 2: TOKEN
-// ======================
-async function handleRedirect() {
-  const code = getQueryParam("code");
-  if (!code) return;
-
-  log("Recibido código OAuth...");
-
-  const codeVerifier = sessionStorage.getItem("code_verifier");
+// TOKEN
+async function getToken(code) {
+  const verifier = sessionStorage.getItem("verifier");
 
   const body = new URLSearchParams();
   body.append("grant_type", "authorization_code");
   body.append("client_id", CLIENT_ID);
   body.append("code", code);
   body.append("redirect_uri", REDIRECT_URI);
-  body.append("code_verifier", codeVerifier);
+  body.append("code_verifier", verifier);
 
-  const response = await fetch(TOKEN_URL, {
+  const res = await fetch(TOKEN_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: body
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body
   });
 
-  const data = await response.json();
-
-  if (!data.access_token) {
-    log("ERROR obteniendo token:");
-    log(JSON.stringify(data));
-    return;
-  }
-
-  log("Token obtenido correctamente");
-
-  sessionStorage.setItem("access_token", data.access_token);
-
-  callParticipants(data.access_token);
+  const data = await res.json();
+  return data.access_token;
 }
 
-// ======================
-// STEP 3: CALL API
-// ======================
-async function callParticipants(token) {
+// API CALL
+async function callApi(token) {
   const conversationId = sessionStorage.getItem("conversationId");
 
-  log("Llamando API /participants...");
-
-  const res = await fetch(`${API_URL}/api/v2/conversations/calls/${conversationId}/participants`, {
+  await fetch(`${API_URL}/api/v2/conversations/calls/${conversationId}/participants`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${token}`,
@@ -141,39 +95,25 @@ async function callParticipants(token) {
     },
     body: JSON.stringify({
       participants: [
-        {
-          address: "+34100"
-        }
+        { address: "+34100" }
       ]
     })
   });
 
-  const text = await res.text();
+  document.getElementById("status").innerText = "Audio reproducido";
 
-  log("Response:");
-  log(text);
-
-  if (res.ok) {
-    alert("Audio disparado correctamente");
-  } else {
-    alert("Error en la llamada (ver log)");
-  }
+  setTimeout(() => window.close(), 500);
 }
 
-// ======================
-// RETRY SIN LOGIN
-// ======================
-function callParticipantsDirect() {
-  const token = sessionStorage.getItem("access_token");
-  if (!token) {
-    alert("No hay token, pulsa el botón principal primero");
-    return;
-  }
-  callParticipants(token);
-}
+// FLOW
+(async () => {
+  const code = getParam("code");
 
-// ======================
-handleRedirect();
+  if (!code) return;
+
+  const token = await getToken(code);
+  await callApi(token);
+})();
 </script>
 
 </body>
